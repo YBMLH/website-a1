@@ -191,4 +191,22 @@ function main() {
   console.log('Seed complete.');
 }
 
-main();
+/**
+ * Seed only if the database is empty (no users). Called on server startup so
+ * the app self-heals on hosts with ephemeral disks (free demo deployments).
+ */
+function seedIfEmpty() {
+  const empty = db.prepare('SELECT COUNT(*) c FROM users').get().c === 0;
+  if (empty) {
+    console.log('Empty database detected — seeding defaults…');
+    seedSettings();
+    seedUser();
+    seedDemo();
+  }
+  return empty;
+}
+
+module.exports = { seedSettings, seedUser, seedDemo, reset, seedIfEmpty };
+
+// Run as a CLI script (npm run seed) — but not when require()'d by the server.
+if (require.main === module) main();

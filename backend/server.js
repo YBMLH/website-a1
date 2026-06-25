@@ -9,6 +9,7 @@ const cookieParser = require('cookie-parser');
 
 const config = require('./src/config');
 require('./src/db/database'); // initialise DB / run schema
+require('./src/db/seed').seedIfEmpty(); // self-seed on empty/ephemeral disks
 const tokens = require('./src/lib/tokens');
 const { apiLimiter } = require('./src/middleware/rateLimit');
 const { notFound, errorHandler } = require('./src/middleware/error');

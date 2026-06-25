@@ -1,0 +1,26 @@
+# Render.com Blueprint — free, no-credit-card demo deployment.
+# Deploys the whole app (Express API + built React frontend + SQLite) as one
+# free web service. Note: the free plan uses an ephemeral disk and sleeps after
+# inactivity, so this is for DEMOS — the app auto-seeds demo content on startup.
+# For a permanent client site, use a VPS with scripts/deploy.sh instead.
+services:
+  - type: web
+    name: business-platform
+    runtime: node
+    plan: free
+    branch: claude/configurable-business-platform-14yp76
+    buildCommand: npm run install:all && npm run build
+    startCommand: npm start
+    autoDeploy: true
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_PASSWORD
+        value: admin123
