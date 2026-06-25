@@ -5,21 +5,19 @@ const fs = require('fs');
 const path = require('path');
 const router = express.Router();
 const { upload, UPLOAD_DIR } = require('../../middleware/upload');
+const audit = require('../../lib/audit');
 
-// Upload one or more images. Returns the public path(s) under /uploads/.
+// Upload one or more images. Returns public paths under /uploads/.
 router.post('/', (req, res) => {
-  upload.array('files', 12)(req, res, (err) => {
+  upload.array('files', 20)(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.message });
-    const files = (req.files || []).map((f) => ({
-      filename: f.filename,
-      path: '/uploads/' + f.filename,
-      size: f.size,
-    }));
+    const files = (req.files || []).map((f) => ({ filename: f.filename, path: '/uploads/' + f.filename, size: f.size }));
+    audit.log('media_uploaded', { count: files.length }, req);
     res.status(201).json({ files });
   });
 });
 
-// List uploaded media.
+// List media library, newest first.
 router.get('/', (req, res) => {
   const items = fs.readdirSync(UPLOAD_DIR)
     .filter((f) => !f.startsWith('.'))
@@ -31,11 +29,11 @@ router.get('/', (req, res) => {
   res.json(items);
 });
 
-// Delete an uploaded file (basename only, no traversal).
 router.delete('/:filename', (req, res) => {
-  const name = path.basename(req.params.filename);
+  const name = path.basename(req.params.filename); // no traversal
   const full = path.join(UPLOAD_DIR, name);
   if (fs.existsSync(full)) fs.unlinkSync(full);
+  audit.log('media_deleted', { filename: name }, req);
   res.json({ ok: true });
 });
 

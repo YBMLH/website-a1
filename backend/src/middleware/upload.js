@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 
-const UPLOAD_DIR = path.join(__dirname, '..', '..', 'public', 'uploads');
+const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads');
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const storage = multer.diskStorage({
@@ -20,15 +20,20 @@ const storage = multer.diskStorage({
   },
 });
 
-const ALLOWED = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.ico', '.avif'];
+const ALLOWED_EXT = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.ico', '.avif'];
+const ALLOWED_MIME = [
+  'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+  'image/svg+xml', 'image/x-icon', 'image/vnd.microsoft.icon', 'image/avif',
+];
 
+// Secure upload: restrict by extension AND mime type, with an 8MB size cap.
 const upload = multer({
   storage,
-  limits: { fileSize: 8 * 1024 * 1024 }, // 8MB
+  limits: { fileSize: 8 * 1024 * 1024, files: 20 },
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
-    if (ALLOWED.includes(ext)) return cb(null, true);
-    cb(new Error('Unsupported file type. Allowed: ' + ALLOWED.join(', ')));
+    if (ALLOWED_EXT.includes(ext) && ALLOWED_MIME.includes(file.mimetype)) return cb(null, true);
+    cb(new Error('Unsupported file type. Allowed images: ' + ALLOWED_EXT.join(', ')));
   },
 });
 

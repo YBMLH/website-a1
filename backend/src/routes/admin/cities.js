@@ -4,16 +4,16 @@ const express = require('express');
 const router = express.Router();
 const db = require('../../db/database');
 const { toBool, toInt, toFloat } = require('../../lib/helpers');
+const audit = require('../../lib/audit');
 
 router.get('/', (req, res) => {
-  const rows = db.prepare(`
+  res.json(db.prepare(`
     SELECT c.*, r.name AS region_name,
       (SELECT COUNT(*) FROM products p WHERE p.city_id = c.id) AS product_count,
       (SELECT COUNT(*) FROM services s WHERE s.city_id = c.id) AS service_count
     FROM cities c LEFT JOIN regions r ON r.id = c.region_id
     ORDER BY c.featured DESC, c.sort_order, c.name
-  `).all();
-  res.json(rows);
+  `).all());
 });
 
 router.get('/:id', (req, res) => {
@@ -26,6 +26,7 @@ function fields(b, existing = {}) {
   return {
     name: b.name ?? existing.name,
     region_id: b.region_id === undefined ? existing.region_id : toInt(b.region_id),
+    region: b.region ?? existing.region ?? null,
     country: b.country ?? existing.country ?? null,
     state_province: b.state_province ?? existing.state_province ?? null,
     address: b.address ?? existing.address ?? null,
@@ -46,9 +47,10 @@ router.post('/', (req, res) => {
   if (!b.name) return res.status(400).json({ error: 'name is required' });
   const f = fields(b);
   const info = db.prepare(`
-    INSERT INTO cities (name, region_id, country, state_province, address, postal_code, google_maps_link, latitude, longitude, image, description, active, featured, sort_order)
-    VALUES (@name,@region_id,@country,@state_province,@address,@postal_code,@google_maps_link,@latitude,@longitude,@image,@description,@active,@featured,@sort_order)
+    INSERT INTO cities (name, region_id, region, country, state_province, address, postal_code, google_maps_link, latitude, longitude, image, description, active, featured, sort_order)
+    VALUES (@name,@region_id,@region,@country,@state_province,@address,@postal_code,@google_maps_link,@latitude,@longitude,@image,@description,@active,@featured,@sort_order)
   `).run(f);
+  audit.log('city_created', { id: info.lastInsertRowid, name: f.name }, req);
   res.status(201).json(db.prepare('SELECT * FROM cities WHERE id = ?').get(info.lastInsertRowid));
 });
 
@@ -57,27 +59,29 @@ router.put('/:id', (req, res) => {
   if (!existing) return res.status(404).json({ error: 'Not found' });
   const f = fields(req.body || {}, existing);
   db.prepare(`
-    UPDATE cities SET name=@name, region_id=@region_id, country=@country, state_province=@state_province,
-      address=@address, postal_code=@postal_code, google_maps_link=@google_maps_link, latitude=@latitude,
-      longitude=@longitude, image=@image, description=@description, active=@active, featured=@featured, sort_order=@sort_order
-    WHERE id=@id
+    UPDATE cities SET name=@name, region_id=@region_id, region=@region, country=@country, state_province=@state_province,
+      address=@address, postal_code=@postal_code, google_maps_link=@google_maps_link, latitude=@latitude, longitude=@longitude,
+      image=@image, description=@description, active=@active, featured=@featured, sort_order=@sort_order WHERE id=@id
   `).run({ ...f, id: Number(req.params.id) });
+  audit.log('city_updated', { id: Number(req.params.id) }, req);
   res.json(db.prepare('SELECT * FROM cities WHERE id = ?').get(req.params.id));
 });
 
-// Quick toggles for active / featured.
+// Quick toggle active / featured.
 router.patch('/:id', (req, res) => {
   const existing = db.prepare('SELECT * FROM cities WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Not found' });
   const b = req.body || {};
-  const active = b.active === undefined ? existing.active : toBool(b.active);
-  const featured = b.featured === undefined ? existing.featured : toBool(b.featured);
-  db.prepare('UPDATE cities SET active = ?, featured = ? WHERE id = ?').run(active, featured, req.params.id);
+  db.prepare('UPDATE cities SET active = ?, featured = ? WHERE id = ?').run(
+    b.active === undefined ? existing.active : toBool(b.active),
+    b.featured === undefined ? existing.featured : toBool(b.featured), req.params.id
+  );
   res.json(db.prepare('SELECT * FROM cities WHERE id = ?').get(req.params.id));
 });
 
 router.delete('/:id', (req, res) => {
   db.prepare('DELETE FROM cities WHERE id = ?').run(req.params.id);
+  audit.log('city_deleted', { id: Number(req.params.id) }, req);
   res.json({ ok: true });
 });
 

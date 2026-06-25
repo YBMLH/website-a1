@@ -4,6 +4,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../../db/database');
 const { toBool, toInt, parseJSON } = require('../../lib/helpers');
+const audit = require('../../lib/audit');
 
 const VALID_TYPES = ['hero', 'text', 'features', 'gallery', 'testimonials', 'faq', 'stats', 'cta', 'html'];
 
@@ -36,16 +37,13 @@ function fields(b, existing = {}) {
 }
 
 router.post('/', (req, res) => {
-  const b = req.body || {};
-  const f = fields(b);
-  if (f.sort_order === 0) {
-    const max = db.prepare('SELECT COALESCE(MAX(sort_order),0) m FROM sections').get().m;
-    f.sort_order = max + 1;
-  }
+  const f = fields(req.body || {});
+  if (!f.sort_order) f.sort_order = (db.prepare('SELECT COALESCE(MAX(sort_order),0) m FROM sections').get().m) + 1;
   const info = db.prepare(`
     INSERT INTO sections (type, title, subtitle, content, image, config, active, sort_order)
     VALUES (@type,@title,@subtitle,@content,@image,@config,@active,@sort_order)
   `).run(f);
+  audit.log('section_created', { id: info.lastInsertRowid, type: f.type }, req);
   const row = db.prepare('SELECT * FROM sections WHERE id = ?').get(info.lastInsertRowid);
   row.config = parseJSON(row.config, {});
   res.status(201).json(row);
@@ -60,22 +58,24 @@ router.put('/:id', (req, res) => {
     UPDATE sections SET type=@type, title=@title, subtitle=@subtitle, content=@content,
       image=@image, config=@config, active=@active, sort_order=@sort_order WHERE id=@id
   `).run(f);
+  audit.log('section_updated', { id: f.id }, req);
   const row = db.prepare('SELECT * FROM sections WHERE id = ?').get(f.id);
   row.config = parseJSON(row.config, {});
   res.json(row);
 });
 
-// Reorder: body { order: [id, id, id...] }
+// Reorder: { order: [id, id, ...] }
 router.post('/reorder', (req, res) => {
   const order = (req.body && req.body.order) || [];
   const upd = db.prepare('UPDATE sections SET sort_order = ? WHERE id = ?');
-  const tx = db.transaction((ids) => ids.forEach((id, i) => upd.run(i + 1, toInt(id))));
-  tx(order);
+  db.transaction((ids) => ids.forEach((id, i) => upd.run(i + 1, toInt(id))))(order);
+  audit.log('section_reordered', { order }, req);
   res.json({ ok: true });
 });
 
 router.delete('/:id', (req, res) => {
   db.prepare('DELETE FROM sections WHERE id = ?').run(req.params.id);
+  audit.log('section_deleted', { id: Number(req.params.id) }, req);
   res.json({ ok: true });
 });
 

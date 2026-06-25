@@ -1,85 +1,85 @@
 'use strict';
 
 const path = require('path');
+const fs = require('fs');
 const express = require('express');
-const session = require('express-session');
-const SQLiteStore = require('connect-sqlite3')(session);
-const expressLayouts = require('express-ejs-layouts');
+const helmet = require('helmet');
+const cors = require('cors');
+const cookieParser = require('cookie-parser');
 
-const db = require('./src/db/database');
-const { getSettings } = require('./src/lib/settings');
-const { formatPrice, escapeHtml } = require('./src/lib/helpers');
+const config = require('./src/config');
+require('./src/db/database'); // initialise DB / run schema
+const tokens = require('./src/lib/tokens');
+const { apiLimiter } = require('./src/middleware/rateLimit');
+const { notFound, errorHandler } = require('./src/middleware/error');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-const DATA_DIR = path.join(__dirname, 'data');
+app.set('trust proxy', 1); // correct client IPs behind a reverse proxy (nginx)
 
 // ---------------------------------------------------------------------------
-// View engine + layouts
+// Security headers. We allow cross-origin resource loading so the SPA dev
+// server (different port) can display uploaded images.
 // ---------------------------------------------------------------------------
-app.set('view engine', 'ejs');
-app.set('views', path.join(__dirname, 'views'));
-app.use(expressLayouts);
-app.set('layout', 'public/layout'); // default layout for the public site
-
-// ---------------------------------------------------------------------------
-// Core middleware
-// ---------------------------------------------------------------------------
-app.use(express.json({ limit: '2mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
-
-app.use(session({
-  store: new SQLiteStore({ db: 'sessions.db', dir: DATA_DIR }),
-  secret: process.env.SESSION_SECRET || 'change-me-in-production',
-  resave: false,
-  saveUninitialized: false,
-  cookie: { maxAge: 1000 * 60 * 60 * 24 * 7, httpOnly: true, sameSite: 'lax' },
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  contentSecurityPolicy: false, // CSP applied to the SPA build separately
 }));
 
-// Inject site settings + helpers into every view.
-app.use((req, res, next) => {
-  res.locals.site = getSettings();
-  res.locals.formatPrice = formatPrice;
-  res.locals.escapeHtml = escapeHtml;
-  res.locals.currentUrl = req.originalUrl;
-  res.locals.user = req.session && req.session.userId
-    ? { id: req.session.userId, username: req.session.username }
-    : null;
-  res.locals.title = res.locals.site.site_name || 'Business Platform';
-  next();
-});
+app.use(cors({
+  origin: config.corsOrigins.length ? config.corsOrigins : true,
+  credentials: true,
+}));
+
+app.use(express.json({ limit: '4mb' }));
+app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
+
+// Serve uploaded media.
+app.use('/uploads', express.static(path.join(__dirname, 'uploads'), { maxAge: '7d' }));
 
 // ---------------------------------------------------------------------------
-// Routes
+// API routes
 // ---------------------------------------------------------------------------
-app.use('/admin', require('./src/routes/admin'));
-app.use('/api', require('./src/routes/api'));
-app.use('/', require('./src/routes/public'));
-
-// Health check.
-app.get('/healthz', (req, res) => res.json({ ok: true }));
+app.use('/api', apiLimiter);
+app.use('/api/auth', require('./src/routes/auth'));
+app.use('/api/public', require('./src/routes/public'));
+app.use('/api/admin', require('./src/routes/admin'));
+app.get('/api/health', (req, res) => res.json({ ok: true, env: config.env }));
 
 // ---------------------------------------------------------------------------
-// 404 + error handling
+// In production, serve the built React frontend (single self-contained app).
 // ---------------------------------------------------------------------------
-app.use((req, res) => {
-  res.status(404);
-  if (req.path.startsWith('/api')) return res.json({ error: 'Not found' });
-  res.render('public/404', { title: 'Page not found', active: '' });
-});
+const FRONTEND_DIST = path.join(__dirname, '..', 'frontend', 'dist');
+if (fs.existsSync(FRONTEND_DIST)) {
+  app.use(express.static(FRONTEND_DIST));
+  // SPA fallback for any non-API, non-upload route.
+  app.get(/^\/(?!api|uploads).*/, (req, res) => {
+    res.sendFile(path.join(FRONTEND_DIST, 'index.html'));
+  });
+} else {
+  app.get('/', (req, res) => res.json({
+    name: 'Business Platform API',
+    note: 'Frontend build not found. Run the Vite dev server in ../frontend, or build it for production.',
+  }));
+}
 
-// eslint-disable-next-line no-unused-vars
-app.use((err, req, res, next) => {
-  console.error(err);
-  res.status(500);
-  if (req.path.startsWith('/api')) return res.json({ error: err.message || 'Server error' });
-  res.render('public/error', { layout: 'public/layout', title: 'Error', message: err.message || 'Something went wrong', active: '' });
-});
+// 404 + error handling (API).
+app.use('/api', notFound);
+app.use(errorHandler);
 
-app.listen(PORT, () => {
-  console.log(`\n  ${getSettings().site_name || 'Business Platform'} running:`);
-  console.log(`   • Public site:    http://localhost:${PORT}/`);
-  console.log(`   • Admin dashboard: http://localhost:${PORT}/admin  (admin / admin123)\n`);
+// Periodic cleanup of expired refresh tokens.
+tokens.purgeExpired();
+setInterval(() => tokens.purgeExpired(), 6 * 60 * 60 * 1000).unref();
+
+app.listen(config.port, () => {
+  console.log(`\n  Business Platform API — ${config.env}`);
+  console.log(`   • API:    http://localhost:${config.port}/api`);
+  console.log(`   • Health: http://localhost:${config.port}/api/health`);
+  if (!fs.existsSync(FRONTEND_DIST)) {
+    console.log('   • Frontend: run `npm run dev` in ../frontend (http://localhost:5173)\n');
+  } else {
+    console.log(`   • App:    http://localhost:${config.port}/\n`);
+  }
 });
 
 module.exports = app;
