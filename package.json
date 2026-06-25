@@ -1,0 +1,16 @@
+{
+  "name": "business-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Reusable, fully-configurable business catalog & lead-generation platform (React + Express + SQLite).",
+  "scripts": {
+    "install:all": "cd backend && npm install && cd ../frontend && npm install",
+    "seed": "cd backend && npm run seed",
+    "reset": "cd backend && npm run reset",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build",
+    "start": "cd backend && NODE_ENV=production npm start"
+  },
+  "license": "MIT"
+}
