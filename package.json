@@ -4,7 +4,7 @@
   "private": true,
   "description": "Reusable, fully-configurable business catalog & lead-generation platform (React + Express + SQLite).",
   "scripts": {
-    "install:all": "cd backend && npm install && cd ../frontend && npm install",
+    "install:all": "cd backend && npm install && cd ../frontend && npm install --include=dev",
     "seed": "cd backend && npm run seed",
     "reset": "cd backend && npm run reset",
     "dev:backend": "cd backend && npm run dev",
